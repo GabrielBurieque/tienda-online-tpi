@@ -97,7 +97,7 @@ public class Program
         app.UseHttpsRedirection();
         app.UseCors("AllowReactFrontend");
         app.UseCustomMiddlewares();
-        app.MapControllers();
+        app.MapControllers()
         app.MapHealthChecks("/healthcheck");
 
         app.Run();
