@@ -1,6 +1,5 @@
-name: CI/CD - Dsw2025Tpi API
+name: CI/CD Build, Test y Deploy a Azure App Service
 
-# Disparadores: push (incluye el merge de un PR) y Pull Requests hacia las ramas principales
 on:
   push:
     branches: [development, main]
@@ -9,84 +8,66 @@ on:
   workflow_dispatch:
 
 env:
-  DOTNET_VERSION: '8.0.x'
-  SOLUTION_PATH: Back/Dsw2025Tpi.sln
-  API_PROJECT: Back/Dsw2025Tpi.Api/Dsw2025Tpi.Api.csproj
+  DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
   IMAGE_NAME: dsw2025tpi-api
-  AZURE_WEBAPP_NAME: DSW2026-API
-  WEBAPP_HOST: dsw2026-api-gqd9fhc3f9fde8bf.centralus-01.azurewebsites.net
 
 jobs:
-  build:
-    name: build
+  # --- NUEVO JOB DE TESTING (CA1) ---
+  test:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Obtener el código
+      - name: 1. Obtener el codigo
         uses: actions/checkout@v4
 
-      - name: Información de la ejecución
-        run: |
-          echo "Evento:  ${{ github.event_name }}"
-          echo "Rama:    ${{ github.ref_name }}"
-          echo "Commit:  ${{ github.sha }}"
-          echo "Autor:   ${{ github.actor }}"
-
-      - name: Configurar .NET SDK
+      - name: 2. Instalar .NET 8
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
+          dotnet-version: '8.0.x'
 
-      - name: Restaurar dependencias (dotnet restore)
-        run: dotnet restore ${{ env.SOLUTION_PATH }}
+      - name: 3. Restaurar paquetes
+        run: dotnet restore Dsw2025Tpi.sln
 
-      - name: Compilar la solución (dotnet build)
-        run: dotnet build ${{ env.SOLUTION_PATH }} --configuration Release --no-restore
+      - name: 4. Compilar
+        run: dotnet build Dsw2025Tpi.sln --configuration Release --no-restore
 
-      - name: Construir la imagen Docker
-        run: docker build -t ${{ env.IMAGE_NAME }}:${{ github.sha }} -f Back/Dockerfile ./Back
+      - name: 5. Ejecutar Pruebas Automatizadas (Bloqueo si fallan)
+        run: dotnet test Dsw2025Tpi.sln --configuration Release --no-build --verbosity normal
 
-      - name: Publicar la API (dotnet publish)
-        run: dotnet publish ${{ env.API_PROJECT }} --configuration Release --no-build --output ./publish
-
-      - name: Guardar el artefacto compilado
-        uses: actions/upload-artifact@v4
-        with:
-          name: api-publish
-          path: ./publish
-          retention-days: 7
-
-  deploy:
-    name: deploy
-    needs: build
-    # Solo se despliega desde main (push/merge o ejecución manual), nunca desde un Pull Request
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+  # --- JOB DE DESPLIEGUE (CA2 - Depende del testing) ---
+  build-and-deploy:
     runs-on: ubuntu-latest
-    environment:
-      name: production
-      url: https://${{ env.WEBAPP_HOST }}
-
+    environment: production
+    needs: test # <-- ESTA ES LA CLAVE DEL CA2 (Job Dependency)
+    
     steps:
-      - name: Descargar el artefacto compilado
-        uses: actions/download-artifact@v4
-        with:
-          name: api-publish
-          path: ./publish
+      - name: 1. Obtener el codigo
+        uses: actions/checkout@v4
 
-      - name: Desplegar en Azure App Service
+      - name: 2. Iniciar sesion en Docker Hub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: 3. Construir la imagen Docker
+        run: |
+          docker build \
+            -t ${{ env.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            -t ${{ env.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest \
+            -f Back/Dockerfile \
+            .
+
+      - name: 4. Subir la imagen a Docker Hub
+        if: github.event_name != 'pull_request'
+        run: |
+          docker push ${{ env.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          docker push ${{ env.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest
+
+      - name: 5. Desplegar el contenedor en Azure App Service
+        if: github.event_name != 'pull_request'
         uses: azure/webapps-deploy@v3
         with:
-          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          app-name: ${{ secrets.APP_SERVICE_NAME }}
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          package: ./publish
-
-      # Prueba de humo: la app puede tardar en arrancar (plan F1 y base serverless pausada)
-      - name: Verificar la API desplegada (smoke test)
-        # shell: bash activa pipefail, así un error de curl no queda oculto por el pipe a head
-        shell: bash
-        run: |
-          curl --fail --silent --show-error --retry 10 --retry-delay 15 --retry-all-errors --max-time 60 \
-            https://${{ env.WEBAPP_HOST }}/healthcheck
-          echo
-          curl --fail --silent --show-error --retry 5 --retry-delay 15 --retry-all-errors --max-time 60 \
-            https://${{ env.WEBAPP_HOST }}/api/products | head -c 300
+          images: ${{ env.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest
