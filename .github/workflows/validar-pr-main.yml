@@ -1,0 +1,24 @@
+name: Validar origen de PR a main
+
+# Según la estrategia de ramas del equipo, a main solo puede llegar development
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  validar-origen:
+    name: validar-origen
+    runs-on: ubuntu-latest
+
+    steps:
+      # La condición va en el paso y no en el job: así el job siempre se ejecuta
+      # y GitHub puede exigirlo como check obligatorio en el ruleset de main
+      - name: Solo se permiten PRs desde development
+        if: github.head_ref != 'development' || github.event.pull_request.head.repo.full_name != github.repository
+        run: |
+          echo "::error::Solo se permiten PRs desde 'development' hacia 'main'. Rama de origen: '${{ github.head_ref }}'"
+          exit 1
+
+      - name: Origen válido
+        if: github.head_ref == 'development' && github.event.pull_request.head.repo.full_name == github.repository
+        run: echo "PR desde development hacia main permitido."
