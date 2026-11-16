@@ -1,4 +1,4 @@
-name: CI/CD Build, Test y Deploy a Azure App Service
+name: CI/CD Pipeline
 
 on:
   push:
@@ -7,67 +7,35 @@ on:
     branches: [development, main]
   workflow_dispatch:
 
-env:
-  DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-  IMAGE_NAME: dsw2025tpi-api
-
 jobs:
-  # --- NUEVO JOB DE TESTING (CA1) ---
+  # 1. EL JOB DE TEST QUE TE TOCA A VOS (CA1)
   test:
     runs-on: ubuntu-latest
     steps:
-      - name: 1. Obtener el codigo
+      - name: Obtener el codigo
         uses: actions/checkout@v4
 
-      - name: 2. Instalar .NET 8
+      - name: Instalar .NET 8
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
 
-      - name: 3. Restaurar paquetes
+      - name: Restaurar paquetes
         run: dotnet restore Back/Dsw2025Tpi.sln
 
-      - name: 4. Compilar
+      - name: Compilar
         run: dotnet build Back/Dsw2025Tpi.sln --configuration Release --no-restore
 
-      - name: 5. Ejecutar Pruebas Automatizadas (Bloqueo si fallan)
+      - name: Ejecutar Pruebas Automatizadas
         run: dotnet test Back/Dsw2025Tpi.sln --configuration Release --no-build --verbosity normal
 
-  # --- JOB DE DESPLIEGUE (CA2 - Depende del testing) ---
+  # 2. EL JOB DE BUILD Y DEDEPLOY ORIGINAL DE TUS COMPAÑEROS (CON EL NEEDS)
   build-and-deploy:
     runs-on: ubuntu-latest
-    environment: production
-    needs: test # <-- ESTA ES LA CLAVE DEL CA2 (Job Dependency)
+    needs: test # <--- ESTO ES LO ÚNICO QUE TIENEN QUE AGREGAR ACÁ (CA2)
     
     steps:
-      - name: 1. Obtener el codigo
+      - name: Obtener el codigo
         uses: actions/checkout@v4
 
-      - name: 2. Iniciar sesion en Docker Hub
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
-        with:
-          username: ${{ env.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: 3. Construir la imagen Docker
-        run: |
-          docker build \
-            -t ${{ env.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
-            -t ${{ env.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest \
-            -f Back/Dockerfile \
-            .
-
-      - name: 4. Subir la imagen a Docker Hub
-        if: github.event_name != 'pull_request'
-        run: |
-          docker push ${{ env.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-          docker push ${{ env.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest
-
-      - name: 5. Desplegar el contenedor en Azure App Service
-        if: github.event_name != 'pull_request'
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: ${{ secrets.APP_SERVICE_NAME }}
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          images: ${{ env.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest
+      # Aquí va el resto de los pasos originales que ya usaban ellos para desplegar a Azure...
