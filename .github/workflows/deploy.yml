@@ -1,4 +1,5 @@
-name: CI/CD Pipeline
+name: CI/CD - Dsw2025Tpi API
+
 
 on:
   push:
@@ -7,60 +8,109 @@ on:
     branches: [development, main]
   workflow_dispatch:
 
+env:
+  DOTNET_VERSION: '8.0.x'
+  SOLUTION_PATH: Back/Dsw2025Tpi.sln
+  API_PROJECT: Back/Dsw2025Tpi.Api/Dsw2025Tpi.Api.csproj
+  IMAGE_NAME: dsw2025tpi-api
+  AZURE_WEBAPP_NAME: DSW2026-API
+  WEBAPP_HOST: dsw2026-api-gqd9fhc3f9fde8bf.centralus-01.azurewebsites.net
+
 jobs:
+  
   test:
+    name: test
     runs-on: ubuntu-latest
     steps:
-      - name: Obtener el codigo
+      - name: Obtener el código
         uses: actions/checkout@v4
 
-      - name: Instalar .NET 8
+      - name: Configurar .NET SDK
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Restaurar paquetes
-        run: dotnet restore Back/Dsw2025Tpi.sln
+      - name: Restaurar dependencias para testing
+        run: dotnet restore ${{ env.SOLUTION_PATH }}
 
-      - name: Compilar
-        run: dotnet build Back/Dsw2025Tpi.sln --configuration Release --no-restore
+      - name: Compilar solución para testing
+        run: dotnet build ${{ env.SOLUTION_PATH }} --configuration Release --no-restore
 
-      - name: Ejecutar Pruebas Automatizadas
-        run: dotnet test Back/Dsw2025Tpi.sln --configuration Release --no-build --verbosity normal
+      - name: Ejecutar pruebas automatizadas (dotnet test)
+        run: dotnet test ${{ env.SOLUTION_PATH }} --configuration Release --no-build --verbosity normal
 
-  build-and-deploy:
+ 
+  build:
+    name: build
+    needs: test  
     runs-on: ubuntu-latest
-    needs: test
-    
+
     steps:
-      - name: Obtener el codigo
+      - name: Obtener el código
         uses: actions/checkout@v4
 
-      - name: Iniciar sesion en Docker Hub
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+      - name: Información de la ejecución
+        run: |
+          echo "Evento:  ${{ github.event_name }}"
+          echo "Rama:    ${{ github.ref_name }}"
+          echo "Commit:  ${{ github.sha }}"
+          echo "Autor:   ${{ github.actor }}"
+
+      - name: Configurar .NET SDK
+        uses: actions/setup-dotnet@v4
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restaurar dependencias (dotnet restore)
+        run: dotnet restore ${{ env.SOLUTION_PATH }}
+
+      - name: Compilar la solución (dotnet build)
+        run: dotnet build ${{ env.SOLUTION_PATH }} --configuration Release --no-restore
 
       - name: Construir la imagen Docker
-        run: |
-          docker build \
-            -t ${{ secrets.DOCKERHUB_USERNAME }}/ics-backend:${{ github.sha }} \
-            -t ${{ secrets.DOCKERHUB_USERNAME }}/ics-backend:latest \
-            -f Back/Dockerfile \
-            .
+        run: docker build -t ${{ env.IMAGE_NAME }}:${{ github.sha }} -f Back/Dockerfile ./Back
 
-      - name: Subir la imagen a Docker Hub
-        if: github.event_name != 'pull_request'
-        run: |
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/ics-backend:${{ github.sha }}
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/ics-backend:latest
+      - name: Publicar la API (dotnet publish)
+        run: dotnet publish ${{ env.API_PROJECT }} --configuration Release --no-build --output ./publish
+
+      - name: Guardar el artefacto compilado
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-publish
+          path: ./publish
+          retention-days: 7
+
+  
+  deploy:
+    name: deploy
+    needs: build
+    
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://${{ env.WEBAPP_HOST }}
+
+    steps:
+      - name: Descargar el artefacto compilado
+        uses: actions/download-artifact@v4
+        with:
+          name: api-publish
+          path: ./publish
 
       - name: Desplegar en Azure App Service
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: azure/webapps-deploy@v3
         with:
-          app-name: ${{ secrets.APP_SERVICE_NAME }}
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/ics-backend:${{ github.sha }}
+          package: ./publish
+
+      
+      - name: Verificar la API desplegada (smoke test)
+        shell: bash
+        run: |
+          curl --fail --silent --show-error --retry 10 --retry-delay 15 --retry-all-errors --max-time 60 \
+            https://${{ env.WEBAPP_HOST }}/healthcheck
+          echo
+          curl --fail --silent --show-error --retry 5 --retry-delay 15 --retry-all-errors --max-time 60 \
+            https://${{ env.WEBAPP_HOST }}/api/products | head -c 300
