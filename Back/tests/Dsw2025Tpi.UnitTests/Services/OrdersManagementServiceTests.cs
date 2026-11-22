@@ -106,7 +106,7 @@ namespace Dsw2025Tpi.UnitTests.Services
                 BillingAddress: "Calle Falsa 123",
                 OrderItems: new List<OrderItemModel.Request> 
                 {
-                    new OrderItemModel.Request(ProductId: productId, Quantity: 5) // Pedimos 5
+                    new OrderItemModel.Request(ProductId: productId, Quantity: 1) // Pedimos 5
                 }
             );
 
