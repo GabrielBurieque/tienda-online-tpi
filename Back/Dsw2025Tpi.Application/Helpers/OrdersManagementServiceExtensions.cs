@@ -79,9 +79,13 @@ namespace Dsw2025Tpi.Application.Helpers
 
         public DateTime GetDateArgentinean()
         {
-            var argentinaTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Argentina Standard Time");
-            var fechaLocalArgentina = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, argentinaTimeZone);
-            return fechaLocalArgentina;
+            // Argentina usa UTC-3 sin horario de verano; si el sistema no tiene datos de zonas horarias se usa el offset fijo
+            if (TimeZoneInfo.TryFindSystemTimeZoneById("Argentina Standard Time", out var argentinaTimeZone))
+            {
+                return TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, argentinaTimeZone);
+            }
+
+            return DateTime.SpecifyKind(DateTime.UtcNow.AddHours(-3), DateTimeKind.Unspecified);
         }
 
         public Order ValidateOrderNull(Guid Id, IEnumerable<Order>? orders)
