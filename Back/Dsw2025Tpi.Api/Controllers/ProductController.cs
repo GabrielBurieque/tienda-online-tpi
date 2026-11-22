@@ -59,7 +59,7 @@ namespace Dsw2025Tpi.Api.Controllers
             [FromQuery] int pageSize = 100)
         {
             // El catálogo público solo muestra productos activos
-            var filter = new ProductModel.FilterProduct("enabled", search, pageNumber, pageSize);
+            var filter = new ProductModel.FilterProduct(null, search, pageNumber, pageSize);
             var result = await _service.GetProducts(filter);
             return Ok(result);
         }
